@@ -69,7 +69,7 @@ normal_permissions = ChatPermissions(
 )
 
 
-delay_factor = 1 # 0 (OFF) | 1 (ON)
+delay_factor = 0 # 0 (OFF) | 1 (ON)
 delay_on_start = 15 # IN SECONDS
 
 async def direct_dev_data(update: Update, context: ContextTypes.DEFAULT_TYPE):

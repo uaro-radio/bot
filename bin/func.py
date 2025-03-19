@@ -58,22 +58,22 @@ class hamqsl:
     async def get_hamqsl_solarvhf_b(self):
         url = "https://www.hamqsl.com/solarvhf.php"
         current_data = dt.datetime.now().strftime("%d-%m-%Y")
-        if os.path.exists(f"Data/hamsql_solar/solarvhf_{current_data}.png"):
-            with open(f"Data/hamsql_solar/solarvhf_{current_data}.png", "rb") as photo:
+        if os.path.exists(f"Data/hamqsl_solar/solarvhf_{current_data}.png"):
+            with open(f"Data/hamqsl_solar/solarvhf_{current_data}.png", "rb") as photo:
                 photo_b = photo.read()
         else:
-            with open(f"Data/hamsql_solar/solarvhf_{current_data}.png", "wb") as file:
+            with open(f"Data/hamqsl_solar/solarvhf_{current_data}.png", "wb") as file:
                 photo_b = await self.__get_fromURL_content_b(url)
                 file.write(photo_b)
         return photo_b
     async def get_hamqsl_solarpic_b(self):
         url = "https://www.hamqsl.com/solarpic.php"
         current_data = dt.datetime.now().strftime("%d-%m-%Y")
-        if os.path.exists(f"Data/hamsql_solar/solarpic_{current_data}.png"):
-            with open(f"Data/hamsql_solar/solarpic_{current_data}.png", "rb") as photo:
+        if os.path.exists(f"Data/hamqsl_solar/solarpic_{current_data}.png"):
+            with open(f"Data/hamqsl_solar/solarpic_{current_data}.png", "rb") as photo:
                 photo_b = photo.read()
         else:
-            with open(f"Data/hamsql_solar/solarpic_{current_data}.png", "wb") as file:
+            with open(f"Data/hamqsl_solar/solarpic_{current_data}.png", "wb") as file:
                 photo_b = await self.__get_fromURL_content_b(url)
                 file.write(photo_b)
         return photo_b
