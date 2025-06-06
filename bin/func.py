@@ -1,18 +1,19 @@
+import base64
+import datetime
 import os
 import re
 import ssl
 import sys
+from telegram.ext import ContextTypes
+import telegram
 
 from bin.Logging import SQLite_Log, Core_Log
+from bin.SQL_func import init_message_user, init_changed_message_user
 from bin.SQLite_Driver import DataBase
 import datetime as dt
 import aiohttp
 
 db = DataBase()
-
-
-
-
 
 def check_db():
     if not os.path.exists("Data.db"):
@@ -114,3 +115,189 @@ class text_parser:
         for x in bad_words:
             fullname = fullname.replace(x, "")
         return fullname
+
+    def get_message_content_types(self,message):
+        return {
+            "text": 1 if message.text else 0,
+            "photo": 1 if message.photo else 0,
+            "gif": 1 if message.animation else 0,  # Telegram позначає GIF як animation
+            "video": 1 if message.video else 0,
+            "voice": 1 if message.voice else 0,
+            "audio": 1 if message.audio else 0,
+            "document": 1 if message.document else 0,
+            "sticker": 1 if message.sticker else 0,
+            "video_note": 1 if message.video_note else 0,
+            "dice": 1 if message.dice else 0,
+            "poll": 1 if message.poll else 0,
+            "location": 1 if message.location else 0,
+            "contact": 1 if message.contact else 0,
+            "game": 1 if message.game else 0
+        }
+class files_func:
+    def __init__(self):
+        self.datetime = datetime.datetime
+
+    async def get_file_func(self, file_id: str, context: ContextTypes.DEFAULT_TYPE) -> str:
+        try:
+            # Отримати об'єкт файлу через context.bot
+            tg_file = await context.bot.get_file(file_id)
+
+            # Підготувати директорію для збереження
+            save_dir = "Data/temp_files"
+            os.makedirs(save_dir, exist_ok=True)
+
+            # Отримати оригінальне ім'я файлу та розширення
+            original_name = os.path.basename(tg_file.file_path)
+            name, ext = os.path.splitext(original_name)
+
+            # Додати мітку часу
+            timestamp = self.datetime.now().strftime("%Y%m%d_%H%M%S")
+            file_name = f"{name}_{timestamp}{ext}"
+            full_path = os.path.join(save_dir, file_name)
+
+            # Завантажити файл
+            await tg_file.download_to_drive(custom_path=full_path)
+
+            return full_path
+        except Exception as e:
+            print(f"[ERROR] get_file_func: {e}")
+            return ""
+class back_up_messages:
+    def __init__(self):
+        self.text_parser = text_parser()
+        self.file_func = files_func()
+
+    async def add_message_to_db(self, msg: telegram.Message, chat_id: int, user_id: int,msg_id:int, context: ContextTypes.DEFAULT_TYPE):
+        try:
+            text_parser = self.text_parser
+            file_func = self.file_func
+
+            content = text_parser.get_message_content_types(msg)
+            its_text = content["text"]
+            its_photo = content["photo"]
+            its_gif = content["gif"]
+            its_video = content["video"]
+            information = ""
+
+            if its_text:
+                information = msg.text or ""
+
+            elif its_photo and msg.photo:
+                try:
+                    photo = msg.photo[-1]  # найбільше фото — останнє
+                    file_path = await file_func.get_file_func(photo.file_id, context)
+                    with open(file_path, "rb") as f:
+                        encoded = base64.b64encode(f.read()).decode("utf-8")
+                    information = encoded
+                except Exception as e:
+                    information = f"not backupable information, tags: photo (error)"
+                    its_photo = 0
+
+            elif its_gif:
+                information = "not backupable information, tags: gif"
+
+            elif its_video:
+                information = "not backupable information, tags: video"
+
+            else:
+                tags = [k for k, v in content.items() if v == 1]
+                tag_text = ', '.join(tags) if tags else "none"
+                information = f"not backupable information, tags: {tag_text}"
+
+            return init_message_user(
+                chat_id=chat_id,
+                user_id=user_id,
+                information=information,
+                its_text=its_text,
+                its_photo=its_photo,
+                its_gif=its_gif,
+                its_video=its_video,
+                deleted=0,
+                msg_id=msg_id
+            )
+
+        except Exception as e:
+            print(f"[ERROR] add_message_to_db: {e}")
+            return False
+    async def add_changed_message_to_db(self, msg: telegram.Message, chat_id: int, user_id: int,msg_id:int, context: ContextTypes.DEFAULT_TYPE):
+        text_parser = self.text_parser
+        file_func = self.file_func
+        content = text_parser.get_message_content_types(msg)
+        its_text = content["text"]
+        its_photo = content["photo"]
+        its_gif = content["gif"]
+        its_video = content["video"]
+        information = ""
+        if its_text:
+            information = msg.text or ""
+        elif its_photo and msg.photo:
+            try:
+                photo = msg.photo[-1]  # найбільше фото — останнє
+                file_path = await file_func.get_file_func(photo.file_id, context)
+                with open(file_path, "rb") as f:
+                    encoded = base64.b64encode(f.read()).decode("utf-8")
+                information = encoded
+            except Exception as e:
+                information = f"not backupable information, tags: photo (error)"
+                its_photo = 0
+
+        elif its_gif:
+            information = "not backupable information, tags: gif"
+
+        elif its_video:
+            information = "not backupable information, tags: video"
+
+        else:
+            tags = [k for k, v in content.items() if v == 1]
+            tag_text = ', '.join(tags) if tags else "none"
+            information = f"not backupable information, tags: {tag_text}"
+        return init_changed_message_user(
+            chat_id=chat_id,
+            user_id=user_id,
+            information=information,
+            its_text=its_text,
+            its_photo=its_photo,
+            its_gif=its_gif,
+            its_video=its_video,
+            msg_id=msg_id
+        )
+class linked_forum_chats:
+    def __init__(self):
+        self.db = db
+
+    def create_link(self,from_chat_id: int, from_msg_thread_id=0, name:str=""):
+        try:
+            return self.db.INSERT_Linked_Forum_Chats(from_chat_id, None, from_msg_thread_id,
+                                                     None, name)
+        except Exception as e:
+            print("create_link error:", e)
+            return False
+
+
+    def get_links_by_from_chat(self, from_chat_id: int):
+        return self.db.SELECT("Linked_Forum_Chats", "from_chat_id", from_chat_id)
+
+    def get_links_by_to_chat(self, to_chat_id: int):
+        return self.db.SELECT("Linked_Forum_Chats", "to_chat_id", to_chat_id)
+
+    def get_links_by_name(self, name: str):
+        return self.db.SELECT("Linked_Forum_Chats", "name", name)
+
+    def delete_link_by_id(self, id: int):
+        return self.db.DELETE("Linked_Forum_Chats", "id", id)
+
+    def delete_links_by_name(self, name: str):
+        return self.db.DELETE("Linked_Forum_Chats", "name", name)
+
+
+    def update_link_to_chat_and_to_thread_by_name(self, new_to_chat_id, new_to_thread_id, name):
+        success = True
+        success &= self.db.UPDATE("Linked_Forum_Chats", "to_chat_id", new_to_chat_id, "name", name)
+        success &= self.db.UPDATE("Linked_Forum_Chats", "to_msg_thread_id", new_to_thread_id, "name", name)
+        return success
+    def get_linked(self, from_chat_id, from_message_thread_id):
+        results = self.db.SELECT_2WHERE("Linked_Forum_Chats", "from_chat_id", from_chat_id, "from_msg_thread_id", from_message_thread_id)
+        if not len(results) == 0:
+            return results
+        else:
+            return False

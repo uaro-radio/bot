@@ -17,3 +17,4 @@ class MessagesText:
     user_dont_muted = "Користувач не в RO"
     user_not_found = "Неможливо знайти користувача!"
     incorrect_command = "Неправильно введена команда!"
+
