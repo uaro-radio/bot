@@ -6,7 +6,7 @@ import ssl
 import sys
 from telegram.ext import ContextTypes
 import telegram
-
+import yaml
 from bin.Logging import SQLite_Log, Core_Log
 from bin.SQL_func import init_message_user, init_changed_message_user
 from bin.SQLite_Driver import DataBase
@@ -28,6 +28,52 @@ def check_db():
             sys.exit()
     else:
         Core_Log.info("База даних - OK")
+
+
+
+class DelayAction:
+    def __init__(self):
+        self.delay_action_array = []
+    def add_delay_action(self, name, time, delay):
+        entry = [name, time, delay]
+        self.delay_action_array.append(entry)
+
+    def remove_delay_action_by_name(self, name_to_remove):
+        new_list = []
+        for item in self.delay_action_array:
+            current_name = item[0]
+            if current_name != name_to_remove:
+                new_list.append(item)
+        self.delay_action_array = new_list
+
+    def get_by_name(self, name_to_find):
+        result = []
+        for item in self.delay_action_array:
+            current_name = item[0]
+            if current_name == name_to_find:
+                result.append(item)
+        return result
+
+    def is_ready(self, name_to_check):
+        new_list = []
+        result = False
+        for item in self.delay_action_array:
+            current_name = item[0]
+            start_time = item[1]
+            delay = item[2]
+
+            target_time = start_time + datetime.timedelta(seconds=delay)
+            now = datetime.datetime.now()
+
+            if current_name == name_to_check and now >= target_time:
+                # Час пройшов, не додаємо до списку — видаляємо
+                result = True
+            else:
+                new_list.append(item)
+
+        self.delay_action_array = new_list
+        return result
+
 
 
 
@@ -301,3 +347,24 @@ class linked_forum_chats:
             return results
         else:
             return False
+class ConfigManager:
+    def __init__(self, filepath="config.yaml"):
+        self.filepath = filepath
+        self._ensure_file_exists()
+
+    def _ensure_file_exists(self):
+        if not os.path.exists(self.filepath):
+            with open(self.filepath, 'w') as f:
+                yaml.dump({}, f)
+
+    def get_value(self, key):
+        with open(self.filepath, 'r') as f:
+            config = yaml.safe_load(f) or {}
+        return config.get(key)
+
+    def set_value(self, key, value):
+        with open(self.filepath, 'r') as f:
+            config = yaml.safe_load(f) or {}
+        config[key] = value
+        with open(self.filepath, 'w') as f:
+            yaml.dump(config, f)

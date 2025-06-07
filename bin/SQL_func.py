@@ -110,32 +110,26 @@ def get_user_analytics(chat_id, user_id):
     return user[0] if len(user) > 0 else False
 def get_messages_by_user(chat_id, user_id):
     return db.SELECT_2WHERE("Messages", "chat_id", chat_id, "user_id", user_id)
-
 def get_changed_messages_by_user(chat_id, user_id):
     return db.SELECT_2WHERE("Changed_Messages", "chat_id", chat_id, "user_id", user_id)
-
 def get_all_messages_by_chat(chat_id):
     return db.SELECT("Messages", "chat_id", chat_id)
-
 def get_all_changed_messages_by_chat(chat_id):
     return db.SELECT("Changed_Messages", "chat_id", chat_id)
 def update_messages(chat_id, user_id, column, value):
     return db.UPDATE_2WHERE("Messages", column, value, "chat_id", chat_id, "user_id", user_id)
 def delete_messages_by_user(chat_id, user_id):
     return db.DELETE_2WHERE("Messages", "chat_id", chat_id, "user_id", user_id)
-
 def delete_changed_messages_by_user(chat_id, user_id):
     return db.DELETE_2WHERE("Changed_Messages", "chat_id", chat_id, "user_id", user_id)
-
 def get_linked_forum_chats_by_from_chat(from_chat_id):
     return db.SELECT("Linked_Forum_Chats", "from_chat_id", from_chat_id)
-
 def update_linked_forum_to_chat(from_chat_id, to_chat_id, from_message_thread_id, to_message_thread_id):
-    return db.UPDATE_3WHERE("Linked_Forum_Chats", "to_message_thread_id", to_message_thread_id, "from_chat_id", from_chat_id, "to_chat_id", to_chat_id)
-
+    return db.UPDATE_2WHERE("Linked_Forum_Chats", "to_message_thread_id", to_message_thread_id, "from_chat_id", from_chat_id, "to_chat_id", to_chat_id)
 def delete_linked_forum_chats_by_from_chat(from_chat_id, from_msg_thread_id):
     return db.DELETE_2WHERE("Linked_Forum_Chats", "from_chat_id", from_chat_id, "from_msg_thread_id", from_msg_thread_id)
-
 def delete_linked_forum_chats_by_chats(from_chat_id, to_chat_id):
     return db.DELETE_2WHERE("Linked_Forum_Chats", "from_chat_id", from_chat_id, "to_chat_id", to_chat_id)
+def update_analytics_thx_count(chat_id, user_id, thx_count):
+    return db.UPDATE_2WHERE("Analytics", "thx_count", thx_count, "user_id", user_id, "chat_id", chat_id)
 

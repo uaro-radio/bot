@@ -11,10 +11,12 @@ class MessagesText:
     unmute_command_message = ('Користувач $USER$ виведений з RO\n'
                             '\u2022 <i><b>Адміністратор</b></i>: $ADMIN_NAME$')
 
+    profile_message = ("📌 <b>Профіль користувача $USER$</b>\n\n"
+                       "❤️ Репутація: <i>$REP$</i>")
 
-
-
+    start_message = ("Це офіційний бот чату UARO: Ukrainian Аmateur Radio Operators\n"
+                     '<a href="https://t.me/Ukraine_Amateur_Radio_Operators">Натисни сюди для вступу</a>\n'
+                     '<a href="https://telegra.ph/Bot-UARO-komandi-ta-%D1%96nformac%D1%96ya-06-07">Команди, інформація</a>')
     user_dont_muted = "Користувач не в RO"
     user_not_found = "Неможливо знайти користувача!"
     incorrect_command = "Неправильно введена команда!"
-
