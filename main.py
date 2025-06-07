@@ -16,10 +16,11 @@ import datetime as dt
 
 from bin.Logging import logging, Core_Log, SQLite_Log, ICS_Log, IBS_Log
 from bin.SQL_func import init_user, is_user_exist, get_user, update_user_username, update_user_fullname, \
-    get_user_by_username, init_analytics_user, get_user_analytics, update_analytics_msg_count
+    get_user_by_username, init_analytics_user, get_user_analytics, update_analytics_msg_count, update_analytics_thx_count, \
+    update_analytics_thx_count
 from bin.SQLite_Driver import DataBase
 from bin.func import check_db
-from bin.func import hamqsl, text_parser, back_up_messages, linked_forum_chats
+from bin.func import hamqsl, text_parser, back_up_messages, linked_forum_chats, DelayAction, ConfigManager
 from bin.msgs_content import MessagesText
 
 logging.getLogger("httpx").setLevel(logging.ERROR)
@@ -41,6 +42,7 @@ if not os.path.exists(".env"):
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
+
 start_time = time.time()
 
 DataBase = DataBase()
@@ -49,42 +51,67 @@ msg_content = MessagesText()
 text_parser = text_parser()
 back_up_messages = back_up_messages()
 linked_forum_chats = linked_forum_chats()
+DelayAction = DelayAction()
+ConfigManager = ConfigManager()
 
+if not "." in ConfigManager.get_value("main_command_channel"):
+    Core_Log.error("Перевір конфіг!")
+    sys.exit()
+
+main_command_channel = ConfigManager.get_value("main_command_channel").split(".")
+config_chat_id = main_command_channel[0]
+config_msg_thread_id = main_command_channel[1]
+thx_delay = int(ConfigManager.get_value("thx_delay"))
 ICS_handler_filters = (filters.TEXT|filters.ATTACHMENT|filters.PHOTO|
                        filters.AUDIO|filters.COMMAND)
 
-mute_permissions = ChatPermissions(
-    can_send_photos=False,
-    can_send_polls=False,
-    can_send_messages=False,
-    can_send_audios=False,
-    can_send_videos=False,
-    can_send_documents=False,
-    can_send_other_messages=False,
-    can_send_video_notes=False,
-    can_send_voice_notes=False
-)
-normal_permissions = ChatPermissions(
-    can_send_photos=True,
-    can_send_polls=True,
-    can_send_messages=True,
-    can_send_audios=True,
-    can_send_videos=True,
-    can_send_documents=True,
-    can_send_other_messages=True,
-    can_send_video_notes=True,
-    can_send_voice_notes=True
-)
-
-
-delay_factor = 0 # 0 (OFF) | 1 (ON)
-delay_on_start = 15 # IN SECONDS
+delay_factor = int(ConfigManager.get_value("delay_start_factor")) # 0 (OFF) | 1 (ON)
+delay_on_start = int(ConfigManager.get_value("delay_start_factor_time")) # IN SECONDS
 async def Test_Handler(update:Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
     user = update.effective_user
     msg = update.effective_message
 
     print(msg.message_thread_id)
+
+
+async def set_main_command_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if delay_factor:
+        current_time = time.time()
+        elapsed_time = current_time - start_time
+        delay = delay_on_start
+        if not elapsed_time >= delay:
+            ICS_Log.warning(f"Ігнорування! (Skip ICS on start) | e_time: {round(float(elapsed_time),2)}/{delay}")
+            return
+    chat = update.effective_chat
+    user = update.effective_user
+    msg = update.effective_message
+    if not update.effective_user.id == 1459969627:
+        return
+    if msg.message_thread_id:
+        ConfigManager.set_value("main_command_channel", f"{chat.id}.{msg.message_thread_id}")
+        await msg.reply_text("Успішно встановлено main_command_channel")
+    else:
+        await msg.reply_text('Виникла помилка! Перевір логи')
+async def reload_config(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if delay_factor:
+        current_time = time.time()
+        elapsed_time = current_time - start_time
+        delay = delay_on_start
+        if not elapsed_time >= delay:
+            ICS_Log.warning(f"Ігнорування! (Skip ICS on start) | e_time: {round(float(elapsed_time),2)}/{delay}")
+            return
+    chat = update.effective_chat
+    user = update.effective_user
+    msg = update.effective_message
+    if not update.effective_user.id == 1459969627:
+        return
+    global main_command_channel, config_chat_id, config_msg_thread_id, thx_delay
+    main_command_channel = ConfigManager.get_value("main_command_channel").split(".")
+    config_chat_id = main_command_channel[0]
+    config_msg_thread_id = main_command_channel[1]
+    thx_delay = int(ConfigManager.get_value("thx_delay"))
+    await msg.reply_text("Конфіг успішно перезавантажено")
 
 async def generate_forum_link(update:Update, context: ContextTypes.DEFAULT_TYPE):
     if delay_factor:
@@ -185,6 +212,49 @@ async def information_correction_system(update: Update, context: ContextTypes.DE
             update_analytics_msg_count(chat.id, user.id)
         else:
             update_analytics_msg_count(chat.id, user.id,int(user_msg_count)+1)
+    # ICS thx
+    if msg.reply_to_message and not msg.reply_to_message.from_user.id == context.bot.id and ("👍" or "👎") in msg.text:
+        if DelayAction.get_by_name("rep"):
+            if not DelayAction.is_ready("rep"):
+                text_delay = str(int(thx_delay))+" секунд" if thx_delay<60 else str(int(thx_delay/60)) +" хвилин"
+                return await msg.reply_text(f"Ви можете змінювати репутацію користувачів не частіше ніж раз в {text_delay}")
+        if user.id == msg.reply_to_message.from_user.id:
+            return
+        if msg.reply_to_message and msg.text and msg.text == "👍":
+            user_reply_to_message = get_user_analytics(chat.id, msg.reply_to_message.from_user.id)
+            username_reply_to_message = text_parser.get_clear_fullname(msg.reply_to_message.from_user.full_name) if msg.reply_to_message.from_user.username is None else "@" + str(msg.reply_to_message.from_user.username)
+            if user_reply_to_message:
+                user_thx_count = user_reply_to_message[4]
+                if user_thx_count is None:
+                    update_analytics_thx_count(chat.id, msg.reply_to_message.from_user.id,1)
+                    await msg.reply_text(f"Ви підвищили репутацію користувача {username_reply_to_message} на 1\n"
+                                         f"Репутація: 1")
+
+                else:
+                    update_analytics_thx_count(chat.id, msg.reply_to_message.from_user.id, int(user_thx_count)+1)
+                    await msg.reply_text(f"Ви підвищили репутацію користувача {username_reply_to_message} на 1\n"
+                                         f"Репутація: {int(user_thx_count)+1}")
+                DelayAction.add_delay_action("rep", datetime.datetime.now(), thx_delay)
+            else:
+                await msg.reply_text(f"Неможливо підвищити репутацію користувача {username_reply_to_message}\n"
+                                     f"Він мусить надіслати хоч одне повідомлення")
+        elif msg.reply_to_message and msg.text and msg.text == "👎":
+            user_reply_to_message = get_user_analytics(chat.id, msg.reply_to_message.from_user.id)
+            username_reply_to_message = text_parser.get_clear_fullname(msg.reply_to_message.from_user.full_name) if msg.reply_to_message.from_user.username is None else "@" + str(msg.reply_to_message.from_user.username)
+            if user_reply_to_message:
+                user_thx_count = user_reply_to_message[4]
+                if user_thx_count is None:
+                    update_analytics_thx_count(chat.id, msg.reply_to_message.from_user.id,-1)
+                    await msg.reply_text(f"Ви понизили репутацію користувача {username_reply_to_message} на 1\n"
+                                         f"Репутація: -1")
+                else:
+                    update_analytics_thx_count(chat.id, msg.reply_to_message.from_user.id, int(user_thx_count)-1)
+                    await msg.reply_text(f"Ви понизили репутацію користувача {username_reply_to_message} на 1\n"
+                                         f"Репутація: {int(user_thx_count)-1}")
+                DelayAction.add_delay_action("rep", datetime.datetime.now(), thx_delay)
+            else:
+                await msg.reply_text(f"Неможливо підвищити репутацію користувача {username_reply_to_message}\n"
+                                     f"Він мусить надіслати хоч одне повідомлення")
 async def information_backup_system(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
     user = update.effective_user
@@ -205,18 +275,18 @@ async def information_backup_system(update: Update, context: ContextTypes.DEFAUL
                      f"Вміст: {information}\n"
                      f"Теги: {tags}\n")
         await back_up_messages.add_message_to_db(msg, chat.id, user.id, msg.id,context)
-
-        is_linked = linked_forum_chats.get_linked(chat.id, msg.message_thread_id)[0]
+        print(f"{chat.id}, {msg.message_thread_id}")
+        is_linked = linked_forum_chats.get_linked(chat.id, msg.message_thread_id)
         print(is_linked)
         if is_linked:
             try:
-                await msg.forward(chat_id=is_linked[2], message_thread_id=is_linked[4])
+                await msg.forward(chat_id=is_linked[0][2], message_thread_id=is_linked[0][4])
             except Exception as e:
                 user_msg = {msg.text if not msg.text is None else f"Перевір логи! Нетекстове повідомлення!\nТеги: {text_parser.get_message_content_types(msg)}"}
                 exception_message = ("Помилка пересилання повідомлення!\n"
                                      f"Користувач: {user.id}/{user.username}/{user.full_name}\n"
-                                     f"Повідомлення: {user_msg}\n   ")
-                await context.bot.send_message(chat_id=is_linked[2],text=exception_message)
+                                     f"Повідомлення: {user_msg}\n")
+                await context.bot.send_message(chat_id=is_linked[0][2],text=exception_message)
                 IBS_Log.error(f"Помилка!\n\n{e}")
 
     else:
@@ -226,6 +296,30 @@ async def information_backup_system(update: Update, context: ContextTypes.DEFAUL
                      f"РЕДАГОВАНО")
         await back_up_messages.add_changed_message_to_db(msg, chat.id, user.id, msg.id,context)
 
+async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if delay_factor:
+        current_time = time.time()
+        elapsed_time = current_time - start_time
+        delay = delay_on_start
+        if not elapsed_time >= delay:
+            Core_Log.warning(f"Ігнорування! (Skip commands on start) | e_time: {round(float(elapsed_time),2)}/{delay}")
+            return
+    chat = update.effective_chat
+    user = update.effective_user
+    msg = update.effective_message
+    global config_chat_id
+    global config_msg_thread_id
+    if not chat.type == "private" and not (msg.message_thread_id and int(config_chat_id) == chat.id and int(config_msg_thread_id) == msg.message_thread_id):
+        return
+    msg_profile = msg_content.profile_message
+    user_analytics = get_user_analytics(chat.id, user.id)
+    if not user_analytics:
+        init_analytics_user(chat.id, user.id)
+        user_analytics = get_user_analytics(chat.id, user.id)
+    placeholders = [["$USER$",text_parser.get_clear_fullname(msg.reply_to_message.from_user.full_name) if msg.reply_to_message.from_user.username is None else "@" + str(msg.reply_to_message.from_user.username)],
+                    ["$REP$", user_analytics[4] if not user_analytics[4] is None else 0]]
+    msg_profile = msg_content.placeholders_to_information(msg_profile, placeholders)
+    await msg.reply_text(msg_profile, parse_mode=telegram.constants.ParseMode.HTML)
 
 
 async def send_solarvhf_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -239,6 +333,10 @@ async def send_solarvhf_photo(update: Update, context: ContextTypes.DEFAULT_TYPE
     chat = update.effective_chat
     user = update.effective_user
     msg = update.effective_message
+    global config_chat_id
+    global config_msg_thread_id
+    if not chat.type == "private" and not (msg.message_thread_id and int(config_chat_id) == chat.id and int(config_msg_thread_id) == msg.message_thread_id):
+        return
     await msg.reply_photo(BytesIO(await hamqsl.get_hamqsl_solarvhf_b()))
 async def send_solarpic_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if delay_factor:
@@ -251,6 +349,10 @@ async def send_solarpic_photo(update: Update, context: ContextTypes.DEFAULT_TYPE
     chat = update.effective_chat
     user = update.effective_user
     msg = update.effective_message
+    global config_chat_id
+    global config_msg_thread_id
+    if not chat.type == "private" and not (msg.message_thread_id and int(config_chat_id) == chat.id and int(config_msg_thread_id) == msg.message_thread_id):
+        return
     await msg.reply_photo(BytesIO(await hamqsl.get_hamqsl_solarpic_b()))
 
 async def send_iss_position(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -264,6 +366,10 @@ async def send_iss_position(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
     user = update.effective_user
     msg = update.effective_message
+    global config_chat_id
+    global config_msg_thread_id
+    if not chat.type == "private" and not (msg.message_thread_id and int(config_chat_id) == chat.id and int(config_msg_thread_id) == msg.message_thread_id):
+        return
     iss_position = await hamqsl.get_iss_position()
     #print(iss_position)
     iss_position_json = json.loads(iss_position)
@@ -271,8 +377,23 @@ async def send_iss_position(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await a.reply_text(f"https://www.google.com/maps?q={iss_position_json['iss_position']['latitude']},{iss_position_json['iss_position']['longitude']}\n"
                        f"Час: {dt.datetime.fromtimestamp(iss_position_json['timestamp']).strftime('%H:%M:%S %d/%m/%y')}\n"
                        f"{'@'+user.username if not user.username is None else user.full_name}", disable_web_page_preview=True)
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if delay_factor:
+        current_time = time.time()
+        elapsed_time = current_time - start_time
+        delay = delay_on_start
+        if not elapsed_time >= delay:
+            Core_Log.warning(f"Ігнорування! (Skip commands on start) | e_time: {round(float(elapsed_time),2)}/{delay}")
+            return
+    chat = update.effective_chat
+    user = update.effective_user
+    msg = update.effective_message
+    if not chat.type == "private":
+        return
+    await msg.reply_text(msg_content.start_message, parse_mode=telegram.constants.ParseMode.HTML)
 
-async def mute_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+"""async def mute_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if delay_factor:
         current_time = time.time()
         elapsed_time = current_time - start_time
@@ -324,9 +445,9 @@ async def mute_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not args_datetime is None:
         await context.bot.restrict_chat_member(chat.id, muted_user_id, permissions=mute_permissions, until_date=args_datetime)
     else:
-        await context.bot.restrict_chat_member(chat.id, muted_user_id, permissions=mute_permissions)
+        await context.bot.restrict_chat_member(chat.id, muted_user_id, permissions=mute_permissions)"""
 
-async def unmute_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+"""async def unmute_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if delay_factor:
         current_time = time.time()
         elapsed_time = current_time - start_time
@@ -363,7 +484,7 @@ async def unmute_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await msg.reply_text(msg_content.user_dont_muted)
         return
     await msg.reply_text(msg_text, parse_mode=telegram.constants.ParseMode.HTML)
-    await context.bot.promote_chat_member(chat.id, muted_user_id)
+    await context.bot.promote_chat_member(chat.id, muted_user_id)"""
 
 async def Callback_Query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -401,7 +522,7 @@ def main():
     check_db()
     app = Application.builder().token(BOT_TOKEN).build()
     # Обробник повідомлень
-    app.add_handler(MessageHandler(filters.ALL, Test_Handler), group=3)
+    #app.add_handler(MessageHandler(filters.ALL, Test_Handler), group=3)
     app.add_handler(MessageHandler(ICS_handler_filters, information_correction_system), group=1)
     app.add_handler(MessageHandler(ICS_handler_filters, information_backup_system), group=2)
     # Command Handlers
@@ -409,9 +530,13 @@ def main():
     app.add_handler(CommandHandler('solarvhf', send_solarvhf_photo))
     app.add_handler(CommandHandler('solarpic', send_solarpic_photo))
     app.add_handler(CommandHandler('iss', send_iss_position))
-    app.add_handler(CommandHandler('mute', mute_command))
-    app.add_handler(CommandHandler('unmute', unmute_command))
+    #app.add_handler(CommandHandler('mute', mute_command))
+    #app.add_handler(CommandHandler('unmute', unmute_command))
     app.add_handler(CommandHandler("gen_link", generate_forum_link))
+    app.add_handler(CommandHandler("profile", profile))
+    app.add_handler(CommandHandler("set_command_channel", set_main_command_channel))
+    app.add_handler(CommandHandler("reload_config", reload_config))
+    app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(Callback_Query))
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
