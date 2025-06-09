@@ -4,17 +4,20 @@ import os
 import sys
 import time
 from io import BytesIO
+from pathlib import Path
 from tokenize import group
 
 import telegram.constants
 from telegram import Update, ChatPermissions, InlineKeyboardMarkup, InlineKeyboardButton, ChatMemberAdministrator, \
-    ChatMemberOwner
+    ChatMemberOwner, InputMediaPhoto
 from telegram.constants import ChatMemberStatus
-from telegram.ext import filters, Application, ContextTypes, MessageHandler, CommandHandler, CallbackQueryHandler
+from telegram.ext import filters, Application, ContextTypes, MessageHandler, CommandHandler, CallbackQueryHandler, \
+    ConversationHandler
 from dotenv import load_dotenv
 import datetime as dt
 
-from bin.Logging import logging, Core_Log, SQLite_Log, ICS_Log, IBS_Log
+from bin.Inline_Keyboards import Inline_Keyboard
+from bin.Logging import logging, Core_Log, SQLite_Log, ICS_Log, IBS_Log, SS_Log
 from bin.SQL_func import init_user, is_user_exist, get_user, update_user_username, update_user_fullname, \
     get_user_by_username, init_analytics_user, get_user_analytics, update_analytics_msg_count, update_analytics_thx_count, \
     update_analytics_thx_count
@@ -35,9 +38,6 @@ if not os.path.exists(".env"):
     Core_Log.critical(".env Файл не знайдено! Запуск неможливий!")
     sys.exit()
 
-
-
-
 # Завантаження .env
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -53,15 +53,26 @@ back_up_messages = back_up_messages()
 linked_forum_chats = linked_forum_chats()
 DelayAction = DelayAction()
 ConfigManager = ConfigManager()
+InlineKeyboards = Inline_Keyboard()
 
-if not "." in ConfigManager.get_value("main_command_channel"):
-    Core_Log.error("Перевір конфіг!")
-    sys.exit()
+
+configs_channel_keys = ['main_command_channel', 'sell_channel', 'sell_channel_admin']
+for x in configs_channel_keys:
+    if not "." in ConfigManager.get_value(x):
+        Core_Log.error("Перевір конфіг!")
+        sys.exit()
+
+# Conversation handler stuff
+sell_s,sell_s2 = range(2)
 
 main_command_channel = ConfigManager.get_value("main_command_channel").split(".")
 config_chat_id = main_command_channel[0]
 config_msg_thread_id = main_command_channel[1]
 thx_delay = int(ConfigManager.get_value("thx_delay"))
+
+sell_channel = ConfigManager.get_value("sell_channel").split(".")
+sell_channel_admin = ConfigManager.get_value("sell_channel_admin").split(".")
+
 ICS_handler_filters = (filters.TEXT|filters.ATTACHMENT|filters.PHOTO|
                        filters.AUDIO|filters.COMMAND)
 
@@ -73,9 +84,9 @@ async def Test_Handler(update:Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.effective_message
 
     print(msg.message_thread_id)
+    print(msg.photo)
 
-
-async def set_main_command_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def set_channel_to_config(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if delay_factor:
         current_time = time.time()
         elapsed_time = current_time - start_time
@@ -88,11 +99,18 @@ async def set_main_command_channel(update: Update, context: ContextTypes.DEFAULT
     msg = update.effective_message
     if not update.effective_user.id == 1459969627:
         return
+    keys = '\n'.join(configs_channel_keys)
+    if not " " in msg.text:
+        await msg.reply_text("Відсутній ключ!\n"
+                             f"Ключі: \n{keys}")
+        return
+    args = msg.text.split(" ")
     if msg.message_thread_id:
-        ConfigManager.set_value("main_command_channel", f"{chat.id}.{msg.message_thread_id}")
-        await msg.reply_text("Успішно встановлено main_command_channel")
+        if args[1] in configs_channel_keys:
+            ConfigManager.set_value(args[1], f"{chat.id}.{msg.message_thread_id}")
+            await msg.reply_text(f"Успішно встановлено {args[1]}")
     else:
-        await msg.reply_text('Виникла помилка! Перевір логи')
+        await msg.reply_text('Виникла помилка!\n Канал не є гілкою!\n Перевір логи')
 async def reload_config(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if delay_factor:
         current_time = time.time()
@@ -106,11 +124,13 @@ async def reload_config(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.effective_message
     if not update.effective_user.id == 1459969627:
         return
-    global main_command_channel, config_chat_id, config_msg_thread_id, thx_delay
+    global main_command_channel, config_chat_id, config_msg_thread_id, thx_delay, sell_channel, sell_channel_admin
     main_command_channel = ConfigManager.get_value("main_command_channel").split(".")
     config_chat_id = main_command_channel[0]
     config_msg_thread_id = main_command_channel[1]
     thx_delay = int(ConfigManager.get_value("thx_delay"))
+    sell_channel = ConfigManager.get_value("sell_channel").split(".")
+    sell_channel_admin = ConfigManager.get_value("sell_channel_admin").split(".")
     await msg.reply_text("Конфіг успішно перезавантажено")
 
 async def generate_forum_link(update:Update, context: ContextTypes.DEFAULT_TYPE):
@@ -133,7 +153,6 @@ async def generate_forum_link(update:Update, context: ContextTypes.DEFAULT_TYPE)
             return await msg.reply_text("Ви не можете ініціалізувати зв'язок в загальному чаті! Використайте інший чат для зв'язку")
         link_name = msg.text.split(" ")[1]
         all_links_by_name = linked_forum_chats.get_links_by_name(link_name)
-        print(all_links_by_name)
         if len(all_links_by_name) == 0:
             linked_forum_chats.create_link(chat.id, msg.message_thread_id, link_name)
             await msg.reply_text("Зв'язок ініціалізовано!\n"
@@ -275,9 +294,7 @@ async def information_backup_system(update: Update, context: ContextTypes.DEFAUL
                      f"Вміст: {information}\n"
                      f"Теги: {tags}\n")
         await back_up_messages.add_message_to_db(msg, chat.id, user.id, msg.id,context)
-        print(f"{chat.id}, {msg.message_thread_id}")
         is_linked = linked_forum_chats.get_linked(chat.id, msg.message_thread_id)
-        print(is_linked)
         if is_linked:
             try:
                 await msg.forward(chat_id=is_linked[0][2], message_thread_id=is_linked[0][4])
@@ -296,6 +313,109 @@ async def information_backup_system(update: Update, context: ContextTypes.DEFAUL
                      f"РЕДАГОВАНО")
         await back_up_messages.add_changed_message_to_db(msg, chat.id, user.id, msg.id,context)
 
+async def sell_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat = update.effective_chat
+    user = update.effective_user
+    msg = update.effective_message
+    if not chat.type == "private":
+        return
+    await msg.reply_text("Оголошення скасовано")
+    return ConversationHandler.END
+async def sell_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if delay_factor:
+        current_time = time.time()
+        elapsed_time = current_time - start_time
+        delay = delay_on_start
+        if not elapsed_time >= delay:
+            Core_Log.warning(f"Ігнорування! (Skip commands on start) | e_time: {round(float(elapsed_time),2)}/{delay}")
+            return
+    chat = update.effective_chat
+    user = update.effective_user
+    msg = update.effective_message
+    if not chat.type == "private":
+        return
+    if user.id == context.bot.id:
+        return
+    await msg.reply_text(msg_content.sell_start_message, reply_markup=Inline_Keyboard.cancel_keyboard)
+    await msg.reply_photo(Path("Data/Examples/Sell_example.png"))
+    await msg.reply_text(msg_content.sell_start_message_2)
+    context.user_data['photo_0'] = ''
+    context.user_data['photo_1'] = ''
+    context.user_data['photo_2'] = ''
+    context.user_data['photo_3'] = ''
+    context.user_data['photo_4'] = ''
+    context.user_data['counter'] = 0
+    return sell_s
+
+async def sell(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat = update.effective_chat
+    user = update.effective_user
+    msg = update.effective_message
+    if not chat.type == "private":
+        return
+    if user.id == context.bot.id:
+        return
+    """username = text_parser.get_clear_fullname(user.full_name) if user.username is None else "@"+str(user.username)
+    additional_info_text = f"Користувач: {user.id}/{username}\n"
+    try:
+        await context.bot.send_photo(chat_id=sell_channel_admin[0], message_thread_id=sell_channel_admin[1],
+                                     reply_markup=InlineKeyboards.SS_to_admin(user.id, msg.id),
+                                     photo=msg.photo, caption=additional_info_text+msg.caption)
+        await msg.reply_text("Оголошення успішно надіслано на перевірку, очікуйте результату")
+    except Exception as e:
+        await msg.reply_text("Виникла помилка при створені оголошення, зв'яжіться з адміністрацією")
+        SS_Log.error(e)
+    return ConversationHandler.END"""
+    description_text = 'Тепер надішліть ТІЛЬКИ ОПИС оголошення:'
+    if msg.text and msg.text.startswith("/done"):
+        await chat.send_message(description_text)
+        return sell_s2
+    elif msg.text:
+        await msg.reply_text("Попробуйте ще раз")
+        return sell_s
+
+    if context.user_data['counter'] < 4:
+        context.user_data[f'photo_{context.user_data["counter"]}'] = msg.photo[-1].file_id
+        context.user_data['counter'] = context.user_data['counter']+1
+        await chat.send_message(f"Ви ще можете надіслати {5-context.user_data['counter']} фото.\n"
+                                f"Якщо більше не бажаєте надсилати фото, введіть /done")
+        return sell_s
+    else:
+        context.user_data[f'photo_{context.user_data["counter"]}'] = msg.photo[-1].file_id
+        await chat.send_message("Досягнуто максимальної кількості фото!")
+        await chat.send_message(description_text)
+        return sell_s2
+async def sell_2(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat = update.effective_chat
+    user = update.effective_user
+    msg = update.effective_message
+    if not chat.type == "private":
+        return
+    if user.id == context.bot.id:
+        return
+    media_collection = []
+    for x in range(context.user_data["counter"]):
+        media_collection.append(InputMediaPhoto(media=context.user_data[f"photo_{x}"]))
+    username = text_parser.get_clear_fullname(user.full_name) if user.username is None else "@" + str(user.username)
+    markdown_seller_username = username if username.startswith(
+        '@') else f'[{username}](tg://user?id={user.id})'
+    additional_info_text = (f"Користувач: {user.id}/{markdown_seller_username}\n"
+                            f"Опис:\n\n")
+    context.user_data['sell_text'] = msg.text
+    context.user_data['seller_username'] = username
+
+
+    try:
+        await context.bot.send_media_group(chat_id=sell_channel_admin[0], message_thread_id=sell_channel_admin[1],
+                                     media=media_collection)
+        await context.bot.send_message(chat_id=sell_channel_admin[0], message_thread_id=sell_channel_admin[1],
+                                       reply_markup=InlineKeyboards.SS_to_admin(user.id), text=additional_info_text + msg.text,
+                                       parse_mode=telegram.constants.ParseMode.MARKDOWN)
+        await msg.reply_text("Оголошення успішно надіслано на перевірку, очікуйте результату")
+    except Exception as e:
+        await msg.reply_text("Виникла помилка при створені оголошення, зв'яжіться з адміністрацією")
+        SS_Log.error(e)
+    return ConversationHandler.END
 async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if delay_factor:
         current_time = time.time()
@@ -316,13 +436,13 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not user_analytics:
         init_analytics_user(chat.id, user.id)
         user_analytics = get_user_analytics(chat.id, user.id)
-    placeholders = [["$USER$",text_parser.get_clear_fullname(msg.reply_to_message.from_user.full_name) if msg.reply_to_message.from_user.username is None else "@" + str(msg.reply_to_message.from_user.username)],
+    placeholders = [["$USER$",text_parser.get_clear_fullname(user.full_name) if user.username is None else "@" + str(user.username)],
                     ["$REP$", user_analytics[4] if not user_analytics[4] is None else 0]]
     msg_profile = msg_content.placeholders_to_information(msg_profile, placeholders)
     await msg.reply_text(msg_profile, parse_mode=telegram.constants.ParseMode.HTML)
 
 
-async def send_solarvhf_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+"""async def send_solarvhf_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if delay_factor:
         current_time = time.time()
         elapsed_time = current_time - start_time
@@ -353,30 +473,8 @@ async def send_solarpic_photo(update: Update, context: ContextTypes.DEFAULT_TYPE
     global config_msg_thread_id
     if not chat.type == "private" and not (msg.message_thread_id and int(config_chat_id) == chat.id and int(config_msg_thread_id) == msg.message_thread_id):
         return
-    await msg.reply_photo(BytesIO(await hamqsl.get_hamqsl_solarpic_b()))
+    await msg.reply_photo(BytesIO(await hamqsl.get_hamqsl_solarpic_b()))"""
 
-async def send_iss_position(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if delay_factor:
-        current_time = time.time()
-        elapsed_time = current_time - start_time
-        delay = delay_on_start
-        if not elapsed_time >= delay:
-            Core_Log.warning(f"Ігнорування! (Skip commands on start) | e_time: {round(float(elapsed_time),2)}/{delay}")
-            return
-    chat = update.effective_chat
-    user = update.effective_user
-    msg = update.effective_message
-    global config_chat_id
-    global config_msg_thread_id
-    if not chat.type == "private" and not (msg.message_thread_id and int(config_chat_id) == chat.id and int(config_msg_thread_id) == msg.message_thread_id):
-        return
-    iss_position = await hamqsl.get_iss_position()
-    #print(iss_position)
-    iss_position_json = json.loads(iss_position)
-    a = await msg.reply_location(latitude=iss_position_json['iss_position']['latitude'], longitude=iss_position_json['iss_position']['longitude'])
-    await a.reply_text(f"https://www.google.com/maps?q={iss_position_json['iss_position']['latitude']},{iss_position_json['iss_position']['longitude']}\n"
-                       f"Час: {dt.datetime.fromtimestamp(iss_position_json['timestamp']).strftime('%H:%M:%S %d/%m/%y')}\n"
-                       f"{'@'+user.username if not user.username is None else user.full_name}", disable_web_page_preview=True)
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if delay_factor:
         current_time = time.time()
@@ -392,100 +490,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await msg.reply_text(msg_content.start_message, parse_mode=telegram.constants.ParseMode.HTML)
 
-
-"""async def mute_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if delay_factor:
-        current_time = time.time()
-        elapsed_time = current_time - start_time
-        delay = delay_on_start
-        if not elapsed_time >= delay:
-            Core_Log.warning(f"Ігнорування! (Skip commands on start) | e_time: {round(float(elapsed_time),2)}/{delay}")
-            return
-    chat = update.effective_chat
-    user = update.effective_user
-    msg = update.effective_message
-
-    chat_member = await context.bot.get_chat_member(chat.id, user.id)
-    if not chat_member.status in ['administrator', 'creator']:
-        return
-    args_User_name, args_datetime = text_parser.parse_mute_command(msg.text)
-
-    if msg.reply_to_message:
-        muted_user = msg.reply_to_message.from_user
-        muted_user_id = muted_user.id
-    else:
-        if args_User_name is None:
-            await msg.reply_text(msg_content.incorrect_command)
-            return
-        else:
-            muted_user = get_user_by_username(chat.id, args_User_name.replace("@", ''))
-            if len(muted_user) == 0:
-                await msg.reply_text(msg_content.user_not_found)
-                return
-            else:
-                muted_user_id = muted_user[1]
-
-    if muted_user_id == context.bot.id or muted_user_id == user.id:
-        return
-    if msg.reply_to_message:
-        if msg.reply_to_message.from_user.username is None:
-            muted_user_name = text_parser.get_clear_fullname(muted_user.full_name)
-        else:
-            muted_user_name = f"@{muted_user.username}"
-    else:
-        muted_user_name = args_User_name
-    admin_user = text_parser.get_clear_fullname(user.full_name) if user.username is None else "@"+str(user.username)
-    placeholders_replace = [["$USER$", muted_user_name], ["$EXP_DATE$", args_datetime.strftime('%H:%M:%S %d/%m/%y') if not args_datetime is None else "Вічність"], ["$ADMIN_NAME$", admin_user]]
-    msg_text = msg_content.mute_command_message
-    msg_text = msg_content.placeholders_to_information(msg_text, placeholders_replace)
-    reply_markup = InlineKeyboardMarkup(
-        [[InlineKeyboardButton("✅ Зняти RO", callback_data=f"unmute_{user.id}_{muted_user_id}")]])
-
-    await msg.reply_text(msg_text, parse_mode=telegram.constants.ParseMode.HTML, reply_markup=reply_markup)
-    if not args_datetime is None:
-        await context.bot.restrict_chat_member(chat.id, muted_user_id, permissions=mute_permissions, until_date=args_datetime)
-    else:
-        await context.bot.restrict_chat_member(chat.id, muted_user_id, permissions=mute_permissions)"""
-
-"""async def unmute_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if delay_factor:
-        current_time = time.time()
-        elapsed_time = current_time - start_time
-        delay = delay_on_start
-        if not elapsed_time >= delay:
-            Core_Log.warning(f"Ігнорування! (Skip commands on start) | e_time: {round(float(elapsed_time),2)}/{delay}")
-            return
-    chat = update.effective_chat
-    user = update.effective_user
-    msg = update.effective_message
-    chat_member = await context.bot.get_chat_member(chat.id, user.id)
-
-    if not chat_member.status in ['administrator', 'creator']:
-        return
-    if msg.reply_to_message:
-        args_user_id = msg.reply_to_message.from_user.id
-        muted_user_id = args_user_id
-        muted_user_name = "@"+msg.reply_to_message.from_user.username if not msg.reply_to_message.from_user.username is None else msg.reply_to_message.from_user.full_name
-    else:
-        muted_user = get_user_by_username(chat.id, msg.text.strip("/unmute ").replace("@", ''))
-        if len(muted_user) == 0 or not muted_user:
-            await msg.reply_text(msg_content.user_not_found)
-            return
-        else:
-            muted_user_id = muted_user[1]
-            muted_user_name = muted_user[2]
-    admin_user = text_parser.get_clear_fullname(user.full_name) if user.username is None else "@" + str(user.username)
-    placeholders_replace = [["$USER$", muted_user_name],["$ADMIN_NAME$", admin_user]]
-    msg_text = msg_content.unmute_command_message
-    msg_text = msg_content.placeholders_to_information(msg_text, placeholders_replace)
-    muted_chat_member = await context.bot.get_chat_member(chat.id, muted_user_id)
-    #default_chat_permissions = (await context.bot.get_chat(chat.id)).permissions
-    if not muted_chat_member.status == "restricted":
-        await msg.reply_text(msg_content.user_dont_muted)
-        return
-    await msg.reply_text(msg_text, parse_mode=telegram.constants.ParseMode.HTML)
-    await context.bot.promote_chat_member(chat.id, muted_user_id)"""
-
 async def Callback_Query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     query = update.callback_query
@@ -493,7 +497,7 @@ async def Callback_Query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = query.message
     qd = query.data
     args = qd.split("_")
-    if qd.startswith("unmute_"):
+    """if qd.startswith("unmute_"):
         chat_member = await context.bot.get_chat_member(chat.id, query.from_user.id)
         if not chat_member.status in ['administrator', 'creator']:
             await query.answer("Ви не адміністратор!")
@@ -511,32 +515,92 @@ async def Callback_Query(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.edit_message_text(msg_text,chat.id, query.message.message_id, parse_mode=telegram.constants.ParseMode.HTML)
         await context.bot.promote_chat_member(chat.id, name_user[1])
         await query.answer("Користувач виведено з RO")
+"""
+    Core_Log.info(f"CQ: {user.username}/{qd}")
+    username = text_parser.get_clear_fullname(user.full_name) if user.username is None else "@" + str(user.username)
+    if args[0] == "sell-accept":
+        markdown_username = username if username.startswith('@') else f'[{username}](tg://user?id={user.id})'
+        seller_username = context.user_data["seller_username"]
+        markdown_seller_username = seller_username if seller_username.startswith('@') else f'[{seller_username}](tg://user?id={args[1]})'
+        edited_text = (f"Користувач: {args[1]}/{markdown_seller_username}\n"
+                        f"Опис:\n\n"
+                        f"{context.user_data['sell_text']}\n\n"
+                       f"Одобрено: {markdown_username}")
 
+        media_collection = []
+        sell_text = (f"Продавець: "
+         f"{markdown_seller_username}\n\n"
+                     f"{context.user_data['sell_text']}")
+        for x in range(context.user_data["counter"]):
+            media_collection.append(InputMediaPhoto(media=context.user_data[f"photo_{x}"],
+            caption=sell_text if x == 0 else None, parse_mode=telegram.constants.ParseMode.MARKDOWN if x == 0 else None))
+        try:
+            await context.bot.send_media_group(chat_id=int(sell_channel[0]), message_thread_id=int(sell_channel[1]),
+                            media=media_collection)
+            await context.bot.edit_message_text(edited_text, chat.id, message.message_id, parse_mode=telegram.constants.ParseMode.MARKDOWN)
+            await context.bot.send_message(args[1], msg_content.sell_accept(markdown_seller_username),
+                                           parse_mode=telegram.constants.ParseMode.MARKDOWN)
+        except Exception as e:
+            Core_Log.error(e)
+            await chat.send_message("Помилка! Перевір логи!")
+        context.user_data.clear()
+    if args[0] == "sell-deny":
+        seller_username = context.user_data['seller_username']
+        markdown_username = username if username.startswith('@') else f'[{username}](tg://user?id={user.id})'
+        markdown_seller_username = seller_username if seller_username.startswith(
+            '@') else f'[{seller_username}](tg://user?id={args[1]})'
+        edited_text = (f"Користувач: {args[1]}/{markdown_seller_username}\n"
+                        f"Опис:\n\n"
+                        f"{context.user_data['sell_text']}\n\n"
+                       f"Відхилено: {markdown_username}")
+        try:
+            await context.bot.edit_message_text(edited_text, chat.id, message.message_id, parse_mode=telegram.constants.ParseMode.MARKDOWN)
+            await context.bot.send_message(args[1], msg_content.sell_deny(markdown_username), parse_mode=telegram.constants.ParseMode.MARKDOWN)
+        except Exception as e:
+            Core_Log.error(e)
+            await chat.send_message("Помилка! Перевір логи!")
+    if args[0] == "sell-cancel":
+        await chat.send_message("Оголошення скасовано!")
+        await context.bot.delete_message(chat.id, message.message_id)
+        return ConversationHandler.END
 
 
 
     try: await query.answer()
     except: pass
 
+
+# Conversaion Handlers
+sell_conv = ConversationHandler(
+        entry_points=[CommandHandler("sell", sell_start)],
+        states={
+            sell_s: [MessageHandler(~filters.Regex("❌ Скасувати"), callback=sell)],
+            sell_s2: [MessageHandler(filters.TEXT, callback=sell_2)]
+        },
+        fallbacks=[MessageHandler(filters.Regex("❌ Скасувати"), callback=sell_back)],
+    )
+
+
+
+
 def main():
     check_db()
     app = Application.builder().token(BOT_TOKEN).build()
-    # Обробник повідомлень
+    # Message Handlers
     #app.add_handler(MessageHandler(filters.ALL, Test_Handler), group=3)
     app.add_handler(MessageHandler(ICS_handler_filters, information_correction_system), group=1)
     app.add_handler(MessageHandler(ICS_handler_filters, information_backup_system), group=2)
     # Command Handlers
     app.add_handler(CommandHandler('sql', direct_dev_data))
-    app.add_handler(CommandHandler('solarvhf', send_solarvhf_photo))
-    app.add_handler(CommandHandler('solarpic', send_solarpic_photo))
-    app.add_handler(CommandHandler('iss', send_iss_position))
-    #app.add_handler(CommandHandler('mute', mute_command))
-    #app.add_handler(CommandHandler('unmute', unmute_command))
+    #app.add_handler(CommandHandler('solarvhf', send_solarvhf_photo))
+    #app.add_handler(CommandHandler('solarpic', send_solarpic_photo))
     app.add_handler(CommandHandler("gen_link", generate_forum_link))
     app.add_handler(CommandHandler("profile", profile))
-    app.add_handler(CommandHandler("set_command_channel", set_main_command_channel))
+    app.add_handler(CommandHandler("setccfg", set_channel_to_config))
     app.add_handler(CommandHandler("reload_config", reload_config))
     app.add_handler(CommandHandler("start", start))
+    # Conversation Handlers
+    app.add_handler(sell_conv)
     app.add_handler(CallbackQueryHandler(Callback_Query))
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 

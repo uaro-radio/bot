@@ -14,7 +14,7 @@ def init_user(chat_id: int, user_id: int, username="", full_name="", call_sign="
     try:
         db.INSERT_Users(chat_id, user_id)
         if username == '':
-            db.UPDATE_2WHERE("Users", "fullname", full_name, "chat_id", chat_id, "user_id", user_id)
+            db.UPDATE_2WHERE("Users", "full_name", full_name, "chat_id", chat_id, "user_id", user_id)
         else:
             db.UPDATE_2WHERE("Users", "username", username, "chat_id", chat_id, "user_id", user_id)
         return True
@@ -35,7 +35,7 @@ def init_linked_forum_chat(id: int, from_chat_id: int, to_chat_id: int,
                            to_msg_thread_id: int = None,
                            name: str = ""):
     try:
-        db.INSERT_Linked_Forum_Chats(id, from_chat_id, to_chat_id,
+        db.INSERT_Linked_Forum_Chats(from_chat_id, to_chat_id,
                                     from_msg_thread_id, to_msg_thread_id, name)
         return True
     except Exception as e:

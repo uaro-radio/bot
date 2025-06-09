@@ -156,7 +156,20 @@ class text_parser:
 
 
     def get_clear_fullname(self, fullname:str):
-        bad_words = ["<b>", "<i>", "<code>", "<s>", "<u>", "<pre", "</b>", "</i>", "</code>", "</s>", "</u>", "</pre"]
+        bad_words = [
+            # HTML-теги
+            "<b>", "</b>",
+            "<i>", "</i>",
+            "<u>", "</u>",
+            "<s>", "</s>",
+            "<code>", "</code>",
+            "<pre", "</pre",
+            "*", "_", "`", "~", "|", "-", "=", ">", ".", "!",
+            "[", "]", "(", ")",
+            "#", "+", "{", "}", "<", ">", "\\",
+            '"', "'", "«", "»", "“", "”", "‘", "’"
+        ]
+
         fullname = fullname
         for x in bad_words:
             fullname = fullname.replace(x, "")

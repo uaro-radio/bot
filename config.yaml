@@ -1,4 +1,6 @@
 delay_start_factor: 1
-delay_start_factor_time: 15
-main_command_channel: '-1.1'
+delay_start_factor_time: 5
+main_command_channel: '-1002508210738.102'
+sell_channel: '-1.1'
+sell_channel_admin: '-1.1'
 thx_delay: 900

@@ -28,7 +28,8 @@ loggers = {
     "UARO-ICS": logging.getLogger("UARO-ICS"),
     "UARO-IBS": logging.getLogger("UARO-IBS"),
     "httpx": logging.getLogger("httpx"),
-    "telegram": logging.getLogger("telegram.ext.Application")
+    "telegram": logging.getLogger("telegram.ext.Application"),
+    "UARO-SS": logging.getLogger("UARO-SS")
 }
 
 for logger in loggers.values():
@@ -42,3 +43,4 @@ Core_Log = loggers["UARO-Core"]
 SQLite_Log = loggers["UARO-SQLite"]
 ICS_Log = loggers["UARO-ICS"]
 IBS_Log = loggers["UARO-IBS"]
+SS_Log = loggers["UARO-SS"]
