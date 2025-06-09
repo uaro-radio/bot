@@ -9,7 +9,7 @@ from tokenize import group
 
 import telegram.constants
 from telegram import Update, ChatPermissions, InlineKeyboardMarkup, InlineKeyboardButton, ChatMemberAdministrator, \
-    ChatMemberOwner, InputMediaPhoto
+    ChatMemberOwner, InputMediaPhoto, ReplyKeyboardRemove
 from telegram.constants import ChatMemberStatus
 from telegram.ext import filters, Application, ContextTypes, MessageHandler, CommandHandler, CallbackQueryHandler, \
     ConversationHandler
@@ -18,6 +18,7 @@ import datetime as dt
 
 from bin.Inline_Keyboards import Inline_Keyboard
 from bin.Logging import logging, Core_Log, SQLite_Log, ICS_Log, IBS_Log, SS_Log
+from bin.Reply_Keyboards import Reply_Keyboard
 from bin.SQL_func import init_user, is_user_exist, get_user, update_user_username, update_user_fullname, \
     get_user_by_username, init_analytics_user, get_user_analytics, update_analytics_msg_count, update_analytics_thx_count, \
     update_analytics_thx_count
@@ -54,25 +55,32 @@ linked_forum_chats = linked_forum_chats()
 DelayAction = DelayAction()
 ConfigManager = ConfigManager()
 InlineKeyboards = Inline_Keyboard()
+ReplyKeyboards = Reply_Keyboard()
 
-
-configs_channel_keys = ['main_command_channel', 'sell_channel', 'sell_channel_admin']
+configs_channel_keys = ['main_command_channel', 'sell_channel', 'sell_channel_admin',
+                        "conversation_with_admins_channel"]
 for x in configs_channel_keys:
-    if not "." in ConfigManager.get_value(x):
-        Core_Log.error("Перевір конфіг!")
-        sys.exit()
+    if not "." in str(ConfigManager.get_value(x)):
+        ConfigManager.set_value(x, "1.1")
+        Core_Log.warning(f"CONFIG: В ключі {x} записана некоректна інформація!\n"
+                         f"Записано стандартні значення!")
 
 # Conversation handler stuff
 sell_s,sell_s2 = range(2)
+conv_with_adm_s = range
+
+
 
 main_command_channel = ConfigManager.get_value("main_command_channel").split(".")
 config_chat_id = main_command_channel[0]
 config_msg_thread_id = main_command_channel[1]
+
 thx_delay = int(ConfigManager.get_value("thx_delay"))
 
 sell_channel = ConfigManager.get_value("sell_channel").split(".")
 sell_channel_admin = ConfigManager.get_value("sell_channel_admin").split(".")
 
+conversation_with_admins_channel = ConfigManager.get_value("conversation_with_admins_channel").split(".")
 ICS_handler_filters = (filters.TEXT|filters.ATTACHMENT|filters.PHOTO|
                        filters.AUDIO|filters.COMMAND)
 
@@ -124,12 +132,15 @@ async def reload_config(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.effective_message
     if not update.effective_user.id == 1459969627:
         return
-    global main_command_channel, config_chat_id, config_msg_thread_id, thx_delay, sell_channel, sell_channel_admin
+    global main_command_channel, config_chat_id, config_msg_thread_id, \
+        thx_delay, sell_channel, sell_channel_admin,\
+        conversation_with_admins_channel
     main_command_channel = ConfigManager.get_value("main_command_channel").split(".")
     config_chat_id = main_command_channel[0]
     config_msg_thread_id = main_command_channel[1]
     thx_delay = int(ConfigManager.get_value("thx_delay"))
     sell_channel = ConfigManager.get_value("sell_channel").split(".")
+    conversation_with_admins_channel = ConfigManager.get_value("conversation_with_admins_channel").split(".")
     sell_channel_admin = ConfigManager.get_value("sell_channel_admin").split(".")
     await msg.reply_text("Конфіг успішно перезавантажено")
 
@@ -328,7 +339,7 @@ async def sell_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         delay = delay_on_start
         if not elapsed_time >= delay:
             Core_Log.warning(f"Ігнорування! (Skip commands on start) | e_time: {round(float(elapsed_time),2)}/{delay}")
-            return
+            return ConversationHandler.END
     chat = update.effective_chat
     user = update.effective_user
     msg = update.effective_message
@@ -338,7 +349,7 @@ async def sell_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await msg.reply_text(msg_content.sell_start_message, reply_markup=Inline_Keyboard.cancel_keyboard)
     await msg.reply_photo(Path("Data/Examples/Sell_example.png"))
-    await msg.reply_text(msg_content.sell_start_message_2)
+    await msg.reply_text(msg_content.sell_start_message_2, reply_markup=ReplyKeyboardRemove())
     context.user_data['photo_0'] = ''
     context.user_data['photo_1'] = ''
     context.user_data['photo_2'] = ''
@@ -442,6 +453,73 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await msg.reply_text(msg_profile, parse_mode=telegram.constants.ParseMode.HTML)
 
 
+async def conversation_with_admin_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if delay_factor:
+        current_time = time.time()
+        elapsed_time = current_time - start_time
+        delay = delay_on_start
+        if not elapsed_time >= delay:
+            Core_Log.warning(f"Ігнорування! (Skip commands on start) | e_time: {round(float(elapsed_time),2)}/{delay}")
+            return ConversationHandler.END
+    chat = update.effective_chat
+    user = update.effective_user
+    msg = update.effective_message
+    if not chat.type == "private":
+        return
+    if user.id == context.bot.id:
+        return
+    await chat.send_message(msg_content.conversation_with_admin_start,
+                            reply_markup=ReplyKeyboards.cancel)
+    return conv_with_adm_s
+async def conversation_with_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat = update.effective_chat
+    user = update.effective_user
+    msg = update.effective_message
+    if not chat.type == "private":
+        return
+    if user.id == context.bot.id:
+        return
+    try:
+        await msg.forward(conversation_with_admins_channel[0], message_thread_id=conversation_with_admins_channel[1])
+    except Exception as e:
+        await msg.reply_text("Виникла помилка! Попробуйте ще раз або зверніться в чат UARO")
+        Core_Log.error(e)
+async def conversation_with_admin_end(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat = update.effective_chat
+    user = update.effective_user
+    msg = update.effective_message
+    if not chat.type == "private":
+        return
+    if user.id == context.bot.id:
+        return
+    await chat.send_message("Чат з адміністрацією завершений!\n"
+                            "Адміністрація всеодно зможе відповісти на ваші повідомлення.",
+                            reply_markup=ReplyKeyboards.start)
+    return ConversationHandler.END
+async def conversation_with_admin_reply_handler(update:Update, context: ContextTypes.DEFAULT_TYPE):
+    if delay_factor:
+        current_time = time.time()
+        elapsed_time = current_time - start_time
+        delay = delay_on_start
+        if not elapsed_time >= delay:
+            Core_Log.warning(f"Ігнорування! (Skip commands on start) | e_time: {round(float(elapsed_time),2)}/{delay}")
+    chat = update.effective_chat
+    user = update.effective_user
+    msg = update.effective_message
+    if user.id == context.bot.id:
+        return
+    if not msg.message_thread_id:
+        return
+    if msg.reply_to_message:
+        if chat.id == int(conversation_with_admins_channel[0]) and msg.message_thread_id == int(conversation_with_admins_channel[1]):
+            username = text_parser.get_clear_fullname(user.full_name) if user.username is None else "@" + str(
+                user.username)
+            markdown_adm_username = username if username.startswith(
+                '@') else f'[{username}](tg://user?id={user.id})'
+            text = (f"Відповідь адміністрації:\n\n "
+                    f"{msg.text}\n"
+                    f"Адміністратор: {markdown_adm_username}")
+            await context.bot.send_message(chat_id=msg.reply_to_message.from_user.id, text=text, parse_mode=telegram.constants.ParseMode.MARKDOWN)
 """async def send_solarvhf_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if delay_factor:
         current_time = time.time()
@@ -488,7 +566,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.effective_message
     if not chat.type == "private":
         return
-    await msg.reply_text(msg_content.start_message, parse_mode=telegram.constants.ParseMode.HTML)
+    await msg.reply_text(msg_content.start_message, parse_mode=telegram.constants.ParseMode.HTML,
+                         reply_markup=ReplyKeyboards.start)
+    try:
+        return ConversationHandler.END
+    except:
+        pass
 
 async def Callback_Query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -560,7 +643,7 @@ async def Callback_Query(update: Update, context: ContextTypes.DEFAULT_TYPE):
             Core_Log.error(e)
             await chat.send_message("Помилка! Перевір логи!")
     if args[0] == "sell-cancel":
-        await chat.send_message("Оголошення скасовано!")
+        await chat.send_message("Оголошення скасовано!", reply_markup=ReplyKeyboards.start)
         await context.bot.delete_message(chat.id, message.message_id)
         return ConversationHandler.END
 
@@ -579,6 +662,13 @@ sell_conv = ConversationHandler(
         },
         fallbacks=[MessageHandler(filters.Regex("❌ Скасувати"), callback=sell_back)],
     )
+conv_with_adm_conv = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex("☎️ Зв'язок з адміністрацією"), conversation_with_admin_start)],
+        states={
+            conv_with_adm_s: [MessageHandler(~filters.Regex("❌ Скасувати"), callback=conversation_with_admin)],
+        },
+        fallbacks=[MessageHandler(filters.Regex("❌ Скасувати"), callback=conversation_with_admin_end)],
+    )
 
 
 
@@ -590,6 +680,7 @@ def main():
     #app.add_handler(MessageHandler(filters.ALL, Test_Handler), group=3)
     app.add_handler(MessageHandler(ICS_handler_filters, information_correction_system), group=1)
     app.add_handler(MessageHandler(ICS_handler_filters, information_backup_system), group=2)
+    app.add_handler(MessageHandler(filters.REPLY & filters.TEXT, conversation_with_admin_reply_handler), group=3)
     # Command Handlers
     app.add_handler(CommandHandler('sql', direct_dev_data))
     #app.add_handler(CommandHandler('solarvhf', send_solarvhf_photo))
@@ -601,6 +692,7 @@ def main():
     app.add_handler(CommandHandler("start", start))
     # Conversation Handlers
     app.add_handler(sell_conv)
+    app.add_handler(conv_with_adm_conv)
     app.add_handler(CallbackQueryHandler(Callback_Query))
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
