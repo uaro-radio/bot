@@ -84,6 +84,9 @@ conversation_with_admins_channel = ConfigManager.get_value("conversation_with_ad
 ICS_handler_filters = (filters.TEXT|filters.ATTACHMENT|filters.PHOTO|
                        filters.AUDIO|filters.COMMAND)
 
+send_all_info_filters = (filters.Regex("💻 Сайт") | filters.Regex("⛪️ Instagram") | filters.Regex("🖥 Ютуб")
+                         | filters.Regex("💳 Підтримати нас"))
+
 delay_factor = int(ConfigManager.get_value("delay_start_factor")) # 0 (OFF) | 1 (ON)
 delay_on_start = int(ConfigManager.get_value("delay_start_factor_time")) # IN SECONDS
 async def Test_Handler(update:Update, context: ContextTypes.DEFAULT_TYPE):
@@ -93,6 +96,7 @@ async def Test_Handler(update:Update, context: ContextTypes.DEFAULT_TYPE):
 
     print(msg.message_thread_id)
     print(msg.photo)
+    print(msg.reply_to_message.text)
 
 async def set_channel_to_config(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if delay_factor:
@@ -479,8 +483,16 @@ async def conversation_with_admin(update: Update, context: ContextTypes.DEFAULT_
         return
     if user.id == context.bot.id:
         return
+    username = text_parser.get_clear_fullname(user.full_name) if user.username is None else "@" + str(user.username)
+    markdown_sender_username = username if username.startswith(
+        '@') else f'[{username}](tg://user?id={user.id})'
+    additional_info_text = (f"Користувач: {user.id}/{markdown_sender_username}\n"
+                            f"\n\n")
+    text = additional_info_text + msg.text
     try:
-        await msg.forward(conversation_with_admins_channel[0], message_thread_id=conversation_with_admins_channel[1])
+        await context.bot.send_message(chat_id=conversation_with_admins_channel[0], message_thread_id=conversation_with_admins_channel[1],
+                                       text=text,
+                                       parse_mode=telegram.constants.ParseMode.MARKDOWN)
     except Exception as e:
         await msg.reply_text("Виникла помилка! Попробуйте ще раз або зверніться в чат UARO")
         Core_Log.error(e)
@@ -510,16 +522,20 @@ async def conversation_with_admin_reply_handler(update:Update, context: ContextT
         return
     if not msg.message_thread_id:
         return
-    if msg.reply_to_message:
-        if chat.id == int(conversation_with_admins_channel[0]) and msg.message_thread_id == int(conversation_with_admins_channel[1]):
+    if msg.reply_to_message.text:
+        if chat.id == int(conversation_with_admins_channel[0]) \
+                and msg.message_thread_id == int(conversation_with_admins_channel[1]) \
+                and msg.reply_to_message.text.startswith("Користувач"):
             username = text_parser.get_clear_fullname(user.full_name) if user.username is None else "@" + str(
                 user.username)
+            sender_id = msg.reply_to_message.text.split("\n")[0].replace("Користувач: ","")
+            sender_id = sender_id.split("/")[0]
             markdown_adm_username = username if username.startswith(
                 '@') else f'[{username}](tg://user?id={user.id})'
-            text = (f"Відповідь адміністрації:\n\n "
-                    f"{msg.text}\n"
+            text = (f"Відповідь адміністрації:\n\n"
+                    f"{msg.text}\n\n"
                     f"Адміністратор: {markdown_adm_username}")
-            await context.bot.send_message(chat_id=msg.reply_to_message.from_user.id, text=text, parse_mode=telegram.constants.ParseMode.MARKDOWN)
+            await context.bot.send_message(chat_id=sender_id, text=text, parse_mode=telegram.constants.ParseMode.MARKDOWN)
 """async def send_solarvhf_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if delay_factor:
         current_time = time.time()
@@ -552,7 +568,29 @@ async def send_solarpic_photo(update: Update, context: ContextTypes.DEFAULT_TYPE
     if not chat.type == "private" and not (msg.message_thread_id and int(config_chat_id) == chat.id and int(config_msg_thread_id) == msg.message_thread_id):
         return
     await msg.reply_photo(BytesIO(await hamqsl.get_hamqsl_solarpic_b()))"""
+async def send_all_info_medium(update:Update, context: ContextTypes.DEFAULT_TYPE):
+    if delay_factor:
+        current_time = time.time()
+        elapsed_time = current_time - start_time
+        delay = delay_on_start
+        if not elapsed_time >= delay:
+            Core_Log.warning(f"Ігнорування! (Skip commands on start) | e_time: {round(float(elapsed_time),2)}/{delay}")
+            return ConversationHandler.END
+    chat = update.effective_chat
+    user = update.effective_user
+    msg = update.effective_message
+    if not chat.type == "private":
+        return
+    await msg.reply_text("Яку інформацію бажаєте знати?")
 
+async def send_all_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if delay_factor:
+        current_time = time.time()
+        elapsed_time = current_time - start_time
+        delay = delay_on_start
+        if not elapsed_time >= delay:
+            Core_Log.warning(f"Ігнорування! (Skip commands on start) | e_time: {round(float(elapsed_time),2)}/{delay}")
+            return ConversationHandler.END
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if delay_factor:
         current_time = time.time()
@@ -663,7 +701,7 @@ sell_conv = ConversationHandler(
         fallbacks=[MessageHandler(filters.Regex("❌ Скасувати"), callback=sell_back)],
     )
 conv_with_adm_conv = ConversationHandler(
-        entry_points=[MessageHandler(filters.Regex("☎️ Зв'язок з адміністрацією"), conversation_with_admin_start)],
+        entry_points=[MessageHandler(filters.Regex("☎️ Зв'язок з адміністрацією")&filters.USER, conversation_with_admin_start)],
         states={
             conv_with_adm_s: [MessageHandler(~filters.Regex("❌ Скасувати"), callback=conversation_with_admin)],
         },
@@ -681,6 +719,8 @@ def main():
     app.add_handler(MessageHandler(ICS_handler_filters, information_correction_system), group=1)
     app.add_handler(MessageHandler(ICS_handler_filters, information_backup_system), group=2)
     app.add_handler(MessageHandler(filters.REPLY & filters.TEXT, conversation_with_admin_reply_handler), group=3)
+    # ReplyKeyboard Message Handlers
+    #app.add_handler(MessageHandler(filters.Regex("📋 Про нас"), send_all_info_medium)) IN FUTURE
     # Command Handlers
     app.add_handler(CommandHandler('sql', direct_dev_data))
     #app.add_handler(CommandHandler('solarvhf', send_solarvhf_photo))
