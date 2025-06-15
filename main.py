@@ -493,7 +493,6 @@ async def conversation_with_admin(update: Update, context: ContextTypes.DEFAULT_
         await context.bot.send_message(chat_id=conversation_with_admins_channel[0], message_thread_id=conversation_with_admins_channel[1],
                                        text=text,
                                        parse_mode=telegram.constants.ParseMode.MARKDOWN)
-
     except Exception as e:
         await msg.reply_text("Виникла помилка! Попробуйте ще раз або зверніться в чат UARO")
         Core_Log.error(e)
