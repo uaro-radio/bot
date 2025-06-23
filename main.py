@@ -416,7 +416,7 @@ async def sell_2(update: Update, context: ContextTypes.DEFAULT_TYPE):
         '@') else f'[{username}](tg://user?id={user.id})'
     additional_info_text = (f"Користувач: {user.id}/{markdown_seller_username}\n"
                             f"Опис:\n\n")
-    context.user_data['sell_text'] = msg.text
+    context.user_data['sell_text'] = text_parser.get_clear_fullname(msg.text)
     context.user_data['seller_username'] = username
 
 
@@ -488,7 +488,7 @@ async def conversation_with_admin(update: Update, context: ContextTypes.DEFAULT_
         '@') else f'[{username}](tg://user?id={user.id})'
     additional_info_text = (f"Користувач: {user.id}/{markdown_sender_username}\n"
                             f"\n\n")
-    text = additional_info_text + msg.text
+    text = additional_info_text + text_parser.get_clear_fullname(msg.text)
     try:
         await context.bot.send_message(chat_id=conversation_with_admins_channel[0], message_thread_id=conversation_with_admins_channel[1],
                                        text=text,
