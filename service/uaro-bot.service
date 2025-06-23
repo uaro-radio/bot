@@ -1,0 +1,16 @@
+[Unit]
+Description=UARO Telegram Bot
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/var/www/uaro.bot
+ExecStart=/usr/local/bin/python3.10 /var/www/uaro.bot/main.py
+Restart=always
+RestartSec=5
+StandardOutput=file:/var/log/uaro-bot.log
+StandardError=file:/var/log/uaro-bot.err.log
+
+[Install]
+WantedBy=multi-user.target
