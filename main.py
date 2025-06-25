@@ -352,7 +352,7 @@ async def sell_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user.id == context.bot.id:
         return
     await msg.reply_text(msg_content.sell_start_message, reply_markup=Inline_Keyboard.cancel_keyboard)
-    await msg.reply_photo(Path("Data/Examples/Sell_example.png"))
+    await msg.reply_photo(Path("Data/Examples/Sell_example.jpg"))
     await msg.reply_text(msg_content.sell_start_message_2, reply_markup=ReplyKeyboardRemove())
     context.user_data['photo_0'] = ''
     context.user_data['photo_1'] = ''
